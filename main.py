@@ -1,5 +1,11 @@
+import logging
 import os
 from contextlib import asynccontextmanager
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request

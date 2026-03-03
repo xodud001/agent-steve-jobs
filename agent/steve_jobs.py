@@ -1,7 +1,10 @@
 import json
+import logging
 import os
 from contextvars import ContextVar
 from typing import Any, AsyncIterator
+
+logger = logging.getLogger(__name__)
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -190,10 +193,26 @@ def build_steve_jobs_agent() -> StateGraph:
         result_request = HumanMessage(content=RESULT_PROMPT)
         response = await llm_final.ainvoke([*state["messages"], result_request])
 
-        result_text = response.content if isinstance(response.content, str) else ""
+        # content can be str or list of content blocks depending on the model response
+        if isinstance(response.content, str):
+            result_text = response.content
+        elif isinstance(response.content, list):
+            result_text = " ".join(
+                block.get("text", "") if isinstance(block, dict) else str(block)
+                for block in response.content
+            )
+        else:
+            result_text = ""
+
+        logger.info("[compile_result] content type: %s", type(response.content).__name__)
+        logger.info("[compile_result] raw response (first 1000 chars):\n%s", result_text[:1000])
+
         parsed = parse_json_from_response(result_text)
 
-        if not parsed:
+        if parsed:
+            logger.info("[compile_result] parsed keys: %s", list(parsed.keys()))
+        else:
+            logger.warning("[compile_result] JSON parsing failed — raw output logged above")
             parsed = {"raw_output": result_text, "error": "JSON parsing failed"}
 
         await _post_progress("✅ 분석 완료. 결과를 정리합니다...")

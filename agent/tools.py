@@ -1,6 +1,9 @@
 import json
+import logging
 import re
 from langchain_core.tools import tool
+
+logger = logging.getLogger(__name__)
 
 
 @tool
@@ -164,15 +167,24 @@ def parse_json_from_response(text: str) -> dict:
     """Extract JSON block from LLM response."""
     json_pattern = r"```(?:json)?\s*([\s\S]*?)```"
     matches = re.findall(json_pattern, text)
+
+    logger.info("[parse_json] found %d code block(s)", len(matches))
+
     if matches:
         try:
-            return json.loads(matches[0])
-        except json.JSONDecodeError:
-            pass
+            result = json.loads(matches[0])
+            logger.info("[parse_json] code block parsed OK, keys: %s", list(result.keys()))
+            return result
+        except json.JSONDecodeError as e:
+            logger.warning("[parse_json] code block JSON decode failed: %s", e)
+            logger.warning("[parse_json] block content (first 500):\n%s", matches[0][:500])
 
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
+        result = json.loads(text)
+        logger.info("[parse_json] bare JSON parsed OK")
+        return result
+    except json.JSONDecodeError as e:
+        logger.warning("[parse_json] bare JSON also failed: %s", e)
         return {}
 
 

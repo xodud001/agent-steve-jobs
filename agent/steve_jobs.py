@@ -67,31 +67,31 @@ Now compile the final output as Jobs would present to his team — clear, struct
 Output ONLY valid JSON inside a ```json block:
 
 ```json
-{{
+{
   "vision_statement": "The unforgettable north star — one or two sentences that make engineers excited and competitors nervous",
   "jobs_gut_reaction": "Steve's unfiltered first reaction to this idea — honest and direct",
   "simplicity_cuts": ["thing Jobs would cut 1", "thing Jobs would cut 2"],
   "summary": "What this product is, in plain English (1-2 sentences)",
   "user_stories": [
-    {{
+    {
       "id": "US-001",
       "role": "specific person, not generic user",
       "action": "visceral action they take",
       "benefit": "meaningful life impact",
       "full_story": "As a [role], I want to [action] so that [benefit]"
-    }}
+    }
   ],
-  "requirements": {{
+  "requirements": {
     "functional": ["capability 1", "capability 2"],
     "non_functional": ["non-functional 1", "non-functional 2"]
-  }},
-  "priorities": {{
+  },
+  "priorities": {
     "must_have": ["the soul — max 3 items"],
     "should_have": ["the polish — max 3 items"],
     "could_have": ["the extras — minimize"],
     "wont_have": ["what Steve cut — be aggressive"]
-  }}
-}}
+  }
+}
 ```"""
 
 

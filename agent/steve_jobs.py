@@ -114,7 +114,7 @@ def build_steve_jobs_agent() -> StateGraph:
         model="claude-sonnet-4-6",
         api_key=os.environ["ANTHROPIC_API_KEY"],
         temperature=0.3,
-        max_tokens=4096,
+        max_tokens=8192,
     )
 
     tool_node = ToolNode(ALL_TOOLS)
@@ -204,7 +204,7 @@ def build_steve_jobs_agent() -> StateGraph:
         else:
             result_text = ""
 
-        logger.info("[compile_result] content type: %s", type(response.content).__name__)
+        logger.info("[compile_result] content type: %s, total length: %d chars", type(response.content).__name__, len(result_text))
         logger.info("[compile_result] raw response (first 1000 chars):\n%s", result_text[:1000])
 
         parsed = parse_json_from_response(result_text)

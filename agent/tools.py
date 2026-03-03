@@ -164,27 +164,47 @@ For each item, state WHY it belongs in that category."""
 
 
 def parse_json_from_response(text: str) -> dict:
-    """Extract JSON block from LLM response."""
-    json_pattern = r"```(?:json)?\s*([\s\S]*?)```"
-    matches = re.findall(json_pattern, text)
+    """Extract JSON from LLM response using multiple fallback strategies."""
+    logger.info("[parse_json] input length: %d chars", len(text))
 
-    logger.info("[parse_json] found %d code block(s)", len(matches))
-
-    if matches:
+    # Strategy 1: properly closed ```json ... ``` block
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if match:
         try:
-            result = json.loads(matches[0])
-            logger.info("[parse_json] code block parsed OK, keys: %s", list(result.keys()))
+            result = json.loads(match.group(1).strip())
+            logger.info("[parse_json] strategy 1 (closed code block) OK, keys: %s", list(result.keys()))
             return result
         except json.JSONDecodeError as e:
-            logger.warning("[parse_json] code block JSON decode failed: %s", e)
-            logger.warning("[parse_json] block content (first 500):\n%s", matches[0][:500])
+            logger.warning("[parse_json] strategy 1 failed: %s", e)
 
+    # Strategy 2: ```json ... without closing backticks (truncated response)
+    match = re.search(r"```(?:json)?\s*(\{[\s\S]*)", text)
+    if match:
+        try:
+            result = json.loads(match.group(1).strip())
+            logger.info("[parse_json] strategy 2 (unclosed code block) OK, keys: %s", list(result.keys()))
+            return result
+        except json.JSONDecodeError as e:
+            logger.warning("[parse_json] strategy 2 failed: %s", e)
+
+    # Strategy 3: first { to last } in the whole text
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            result = json.loads(text[start : end + 1])
+            logger.info("[parse_json] strategy 3 (raw JSON slice) OK, keys: %s", list(result.keys()))
+            return result
+        except json.JSONDecodeError as e:
+            logger.warning("[parse_json] strategy 3 failed: %s", e)
+
+    # Strategy 4: whole text as JSON
     try:
-        result = json.loads(text)
-        logger.info("[parse_json] bare JSON parsed OK")
+        result = json.loads(text.strip())
+        logger.info("[parse_json] strategy 4 (full text) OK")
         return result
     except json.JSONDecodeError as e:
-        logger.warning("[parse_json] bare JSON also failed: %s", e)
+        logger.warning("[parse_json] all strategies failed. last error: %s", e)
         return {}
 
 

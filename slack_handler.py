@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 
 from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
@@ -88,29 +89,12 @@ def build_result_blocks(idea: str, result: dict) -> list:
     ]
 
 
-# ── /steve-jobs slash command ──────────────────────────────────
+# ── Shared agent runner ────────────────────────────────────────
 
-@bolt_app.command("/steve-jobs")
-async def handle_steve_jobs(ack, client, command):
-    # Acknowledge immediately — Slack requires a response within 3 seconds
-    await ack()
-
-    idea = command.get("text", "").strip()
-    channel = command["channel_id"]
-
-    if not idea:
-        await client.chat_postMessage(
-            channel=channel,
-            text="사용법: `/steve-jobs [아이디어를 입력하세요]`",
-        )
-        return
-
-    # Post the initial message and capture ts — all progress replies go into this thread
-    initial = await client.chat_postMessage(
-        channel=channel,
-        text="Steve Jobs가 검토 중입니다... 🤔",
-    )
-    thread_ts = initial["ts"]
+async def _run_agent_background(
+    client, idea: str, channel: str, thread_ts: str
+) -> None:
+    """Run the Steve Jobs agent in the background and post the result to the thread."""
 
     async def run_and_respond():
         try:
@@ -135,3 +119,55 @@ async def handle_steve_jobs(ack, client, command):
             )
 
     asyncio.create_task(run_and_respond())
+
+
+# ── /steve-jobs slash command ──────────────────────────────────
+
+@bolt_app.command("/steve-jobs")
+async def handle_steve_jobs(ack, client, command):
+    await ack()
+
+    idea = command.get("text", "").strip()
+    channel = command["channel_id"]
+
+    if not idea:
+        await client.chat_postMessage(
+            channel=channel,
+            text="사용법: `/steve-jobs [아이디어를 입력하세요]`",
+        )
+        return
+
+    # Initial message becomes the thread root — capture its ts
+    initial = await client.chat_postMessage(
+        channel=channel,
+        text="Steve Jobs가 검토 중입니다... 🤔",
+    )
+    await _run_agent_background(client, idea, channel, initial["ts"])
+
+
+# ── @steve-jobs mention ────────────────────────────────────────
+
+@bolt_app.event("app_mention")
+async def handle_mention(client, event):
+    channel = event["channel"]
+    # If mentioned inside a thread, stay in that thread; otherwise thread under the mention
+    thread_ts = event.get("thread_ts") or event["ts"]
+
+    # Strip the mention tag(s) from the message text
+    raw_text = event.get("text", "")
+    idea = re.sub(r"<@[A-Z0-9]+>", "", raw_text).strip()
+
+    if not idea:
+        await client.chat_postMessage(
+            channel=channel,
+            thread_ts=thread_ts,
+            text="아이디어를 입력해 주세요. 예: `@steve-jobs 음악 스트리밍 서비스`",
+        )
+        return
+
+    await client.chat_postMessage(
+        channel=channel,
+        thread_ts=thread_ts,
+        text="Steve Jobs가 검토 중입니다... 🤔",
+    )
+    await _run_agent_background(client, idea, channel, thread_ts)

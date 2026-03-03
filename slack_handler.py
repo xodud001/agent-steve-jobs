@@ -91,23 +91,47 @@ def build_result_blocks(idea: str, result: dict) -> list:
 # ── /steve-jobs slash command ──────────────────────────────────
 
 @bolt_app.command("/steve-jobs")
-async def handle_steve_jobs(ack, respond, command):
+async def handle_steve_jobs(ack, client, command):
     # Acknowledge immediately — Slack requires a response within 3 seconds
     await ack()
 
     idea = command.get("text", "").strip()
+    channel = command["channel_id"]
+
     if not idea:
-        await respond("사용법: `/steve-jobs [아이디어를 입력하세요]`")
+        await client.chat_postMessage(
+            channel=channel,
+            text="사용법: `/steve-jobs [아이디어를 입력하세요]`",
+        )
         return
 
-    await respond("Steve Jobs가 검토 중입니다... 🤔")
+    # Post the initial message and capture ts — all progress replies go into this thread
+    initial = await client.chat_postMessage(
+        channel=channel,
+        text="Steve Jobs가 검토 중입니다... 🤔",
+    )
+    thread_ts = initial["ts"]
 
     async def run_and_respond():
         try:
-            result = await run_po_agent(idea)
+            result = await run_po_agent(
+                idea,
+                slack_client=client,
+                channel=channel,
+                thread_ts=thread_ts,
+            )
             blocks = build_result_blocks(idea, result)
-            await respond(blocks=blocks, text="Steve Jobs의 PO 분석 완료")
+            await client.chat_postMessage(
+                channel=channel,
+                thread_ts=thread_ts,
+                blocks=blocks,
+                text="Steve Jobs의 PO 분석 완료",
+            )
         except Exception as e:
-            await respond(f"❌ Steve Jobs가 분석 중 오류가 발생했습니다: {e}")
+            await client.chat_postMessage(
+                channel=channel,
+                thread_ts=thread_ts,
+                text=f"❌ Steve Jobs가 분석 중 오류가 발생했습니다: {e}",
+            )
 
     asyncio.create_task(run_and_respond())

@@ -1,5 +1,6 @@
 import json
 import os
+from contextvars import ContextVar
 from typing import Any, AsyncIterator
 
 from langchain_anthropic import ChatAnthropic
@@ -9,6 +10,29 @@ from langgraph.prebuilt import ToolNode
 
 from .state import POAgentState
 from .tools import ALL_TOOLS, parse_json_from_response
+
+# ── Slack progress context ─────────────────────────────────────
+# ContextVar is copied into child coroutines by asyncio — safe for ainvoke.
+
+_slack_ctx: ContextVar[dict | None] = ContextVar("slack_ctx", default=None)
+
+
+async def _post_progress(text: str) -> None:
+    """Post a progress message to the Slack thread if context is set."""
+    ctx = _slack_ctx.get()
+    if not ctx:
+        return
+    try:
+        await ctx["client"].chat_postMessage(
+            channel=ctx["channel"],
+            thread_ts=ctx["thread_ts"],
+            text=text,
+        )
+    except Exception:
+        pass  # Never let Slack errors break the agent
+
+
+# ── Prompts ────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are Steve Jobs — co-founder of Apple, visionary, and the most demanding product mind of the 20th century.
 
@@ -71,6 +95,8 @@ Output ONLY valid JSON inside a ```json block:
 ```"""
 
 
+# ── Graph ──────────────────────────────────────────────────────
+
 def build_steve_jobs_agent() -> StateGraph:
     """Build the Steve Jobs AI agent as a LangGraph StateGraph."""
 
@@ -90,10 +116,10 @@ def build_steve_jobs_agent() -> StateGraph:
 
     tool_node = ToolNode(ALL_TOOLS)
 
-    # ── Nodes ──────────────────────────────────────────────────
+    # ── Nodes (all async for Slack progress posts) ──────────────
 
-    def analyze_idea(state: POAgentState) -> dict:
-        """Steve Jobs challenges the fundamental premise before anything else."""
+    async def analyze_idea(state: POAgentState) -> dict:
+        await _post_progress("🧠 아이디어를 분석하고 있습니다...")
         messages = [
             SystemMessage(content=SYSTEM_PROMPT),
             HumanMessage(
@@ -104,14 +130,15 @@ def build_steve_jobs_agent() -> StateGraph:
                 )
             ),
         ]
-        response = llm.invoke(messages)
+        response = await llm.ainvoke(messages)
+        await _post_progress("✅ 아이디어 분석 완료")
         return {
             "messages": [*messages, response],
             "current_step": "challenging_vision",
         }
 
-    def process_vision(state: POAgentState) -> dict:
-        """Vision challenged. Now write user stories the Jobs way."""
+    async def process_vision(state: POAgentState) -> dict:
+        await _post_progress("📝 유저 스토리 작성 중...")
         follow_up = HumanMessage(
             content=(
                 "Vision challenged and clarified. "
@@ -119,14 +146,15 @@ def build_steve_jobs_agent() -> StateGraph:
                 "not feature checklists. Make people feel something."
             )
         )
-        response = llm.invoke([*state["messages"], follow_up])
+        response = await llm.ainvoke([*state["messages"], follow_up])
+        await _post_progress("✅ 유저 스토리 작성 완료")
         return {
             "messages": [follow_up, response],
             "current_step": "writing_stories",
         }
 
-    def process_stories(state: POAgentState) -> dict:
-        """User stories done. Now define requirements with Jobs' obsession for simplicity."""
+    async def process_stories(state: POAgentState) -> dict:
+        await _post_progress("⚙️ 요구사항 정의 중...")
         follow_up = HumanMessage(
             content=(
                 "User stories are done. "
@@ -134,14 +162,15 @@ def build_steve_jobs_agent() -> StateGraph:
                 "every requirement must earn its place. Cut everything that doesn't serve the user directly."
             )
         )
-        response = llm.invoke([*state["messages"], follow_up])
+        response = await llm.ainvoke([*state["messages"], follow_up])
+        await _post_progress("✅ 요구사항 정의 완료")
         return {
             "messages": [follow_up, response],
             "current_step": "defining_requirements",
         }
 
-    def process_requirements(state: POAgentState) -> dict:
-        """Requirements defined. Prioritize with ruthless focus."""
+    async def process_requirements(state: POAgentState) -> dict:
+        await _post_progress("🎯 MoSCoW 우선순위 결정 중...")
         follow_up = HumanMessage(
             content=(
                 "Requirements defined. "
@@ -149,16 +178,17 @@ def build_steve_jobs_agent() -> StateGraph:
                 "Be brutal. Great products say no to almost everything."
             )
         )
-        response = llm.invoke([*state["messages"], follow_up])
+        response = await llm.ainvoke([*state["messages"], follow_up])
+        await _post_progress("✅ 우선순위 결정 완료")
         return {
             "messages": [follow_up, response],
             "current_step": "prioritizing",
         }
 
-    def compile_result(state: POAgentState) -> dict:
-        """Compile all analysis into a structured JSON Jobs would approve."""
+    async def compile_result(state: POAgentState) -> dict:
+        await _post_progress("📊 최종 결과 정리 중...")
         result_request = HumanMessage(content=RESULT_PROMPT)
-        response = llm_final.invoke([*state["messages"], result_request])
+        response = await llm_final.ainvoke([*state["messages"], result_request])
 
         result_text = response.content if isinstance(response.content, str) else ""
         parsed = parse_json_from_response(result_text)
@@ -166,6 +196,7 @@ def build_steve_jobs_agent() -> StateGraph:
         if not parsed:
             parsed = {"raw_output": result_text, "error": "JSON parsing failed"}
 
+        await _post_progress("✅ 분석 완료. 결과를 정리합니다...")
         return {
             "messages": [result_request, response],
             "result": parsed,
@@ -246,7 +277,8 @@ def build_steve_jobs_agent() -> StateGraph:
     return graph.compile()
 
 
-# Singleton graph instance
+# ── Singleton ──────────────────────────────────────────────────
+
 _graph = None
 
 
@@ -273,15 +305,34 @@ def _initial_state(user_idea: str) -> POAgentState:
     }
 
 
-async def run_po_agent(user_idea: str) -> dict[str, Any]:
-    """Run the Steve Jobs agent and return the final result."""
-    graph = get_graph()
-    final_state = await graph.ainvoke(_initial_state(user_idea))
-    return final_state["result"]
+# ── Public API ─────────────────────────────────────────────────
+
+async def run_po_agent(
+    user_idea: str,
+    slack_client=None,
+    channel: str | None = None,
+    thread_ts: str | None = None,
+) -> dict[str, Any]:
+    """Run the Steve Jobs agent and return the final result.
+
+    Pass slack_client, channel, thread_ts to enable real-time progress posts
+    into a Slack thread during graph execution.
+    """
+    if slack_client and channel and thread_ts:
+        token = _slack_ctx.set({"client": slack_client, "channel": channel, "thread_ts": thread_ts})
+    else:
+        token = _slack_ctx.set(None)
+
+    try:
+        graph = get_graph()
+        final_state = await graph.ainvoke(_initial_state(user_idea))
+        return final_state["result"]
+    finally:
+        _slack_ctx.reset(token)
 
 
 async def stream_po_agent(user_idea: str) -> AsyncIterator[str]:
-    """Run the Steve Jobs agent in streaming mode."""
+    """Run the Steve Jobs agent in SSE streaming mode (REST API only)."""
     graph = get_graph()
 
     step_labels = {
